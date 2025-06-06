@@ -90,6 +90,20 @@ func (p *offlineProvider) ValidateEphemeralResourceConfig(providers.ValidateEphe
 	}
 }
 
+// ValidateListResourceConfig implements providers.Interface.
+func (p *offlineProvider) ValidateListResourceConfig(providers.ValidateListResourceConfigRequest) providers.ValidateListResourceConfigResponse {
+	var diags tfdiags.Diagnostics
+	diags = diags.Append(tfdiags.AttributeValue(
+		tfdiags.Error,
+		"Called ValidateListResourceConfig on an unconfigured provider",
+		"Cannot validate this resource config because this provider is not configured. This is a bug in Terraform - please report it.",
+		nil, // nil attribute path means the overall configuration block
+	))
+	return providers.ValidateListResourceConfigResponse{
+		Diagnostics: diags,
+	}
+}
+
 func (o *offlineProvider) UpgradeResourceState(_ providers.UpgradeResourceStateRequest) providers.UpgradeResourceStateResponse {
 	var diags tfdiags.Diagnostics
 	diags = diags.Append(tfdiags.AttributeValue(
@@ -233,6 +247,45 @@ func (u *offlineProvider) CloseEphemeralResource(providers.CloseEphemeralResourc
 
 func (o *offlineProvider) CallFunction(request providers.CallFunctionRequest) providers.CallFunctionResponse {
 	return o.unconfiguredClient.CallFunction(request)
+}
+
+func (o *offlineProvider) ListResource(providers.ListResourceRequest) providers.ListResourceResponse {
+	var resp providers.ListResourceResponse
+	resp.Diagnostics = resp.Diagnostics.Append(tfdiags.AttributeValue(
+		tfdiags.Error,
+		"Called ListResource on an unconfigured provider",
+		"Cannot list this resource because this provider is not configured. This is a bug in Terraform - please report it.",
+		nil, // nil attribute path means the overall configuration block
+	))
+	return resp
+}
+
+// ValidateStateStoreConfig implements providers.Interface.
+func (o *offlineProvider) ValidateStateStoreConfig(providers.ValidateStateStoreConfigRequest) providers.ValidateStateStoreConfigResponse {
+	var diags tfdiags.Diagnostics
+	diags = diags.Append(tfdiags.AttributeValue(
+		tfdiags.Error,
+		"Called ValidateStateStoreConfig on an unconfigured provider",
+		"Cannot validate state store because this provider is not configured. This is a bug in Terraform - please report it.",
+		nil, // nil attribute path means the overall configuration block
+	))
+	return providers.ValidateStateStoreConfigResponse{
+		Diagnostics: diags,
+	}
+}
+
+// ConfigureStateStore implements providers.Interface.
+func (o *offlineProvider) ConfigureStateStore(providers.ConfigureStateStoreRequest) providers.ConfigureStateStoreResponse {
+	var diags tfdiags.Diagnostics
+	diags = diags.Append(tfdiags.AttributeValue(
+		tfdiags.Error,
+		"Called ConfigureStateStore on an unconfigured provider",
+		"Cannot configure state store because this provider is not configured. This is a bug in Terraform - please report it.",
+		nil, // nil attribute path means the overall configuration block
+	))
+	return providers.ConfigureStateStoreResponse{
+		Diagnostics: diags,
+	}
 }
 
 func (o *offlineProvider) Close() error {

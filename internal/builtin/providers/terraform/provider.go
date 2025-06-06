@@ -35,6 +35,7 @@ func (p *Provider) GetProviderSchema() providers.GetProviderSchemaResponse {
 			"terraform_data": dataStoreResourceSchema(),
 		},
 		EphemeralResourceTypes: map[string]providers.Schema{},
+		ListResourceTypes:      map[string]providers.Schema{},
 		Functions: map[string]providers.FunctionDecl{
 			"encode_tfvars": {
 				Summary:     "Produce a string representation of an object using the same syntax as for `.tfvars` files",
@@ -72,6 +73,7 @@ func (p *Provider) GetProviderSchema() providers.GetProviderSchemaResponse {
 				ReturnType: cty.String,
 			},
 		},
+		StateStores: map[string]providers.Schema{},
 	}
 	providers.SchemaCache.Set(tfaddr.NewProvider(tfaddr.BuiltInProviderHost, tfaddr.BuiltInProviderNamespace, "terraform"), resp)
 	return resp
@@ -111,6 +113,12 @@ func (p *Provider) ValidateDataResourceConfig(req providers.ValidateDataResource
 	res.Diagnostics = diags
 
 	return res
+}
+
+func (p *Provider) ValidateListResourceConfig(req providers.ValidateListResourceConfigRequest) providers.ValidateListResourceConfigResponse {
+	var resp providers.ValidateListResourceConfigResponse
+	resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("unsupported list resource type %q", req.TypeName))
+	return resp
 }
 
 // Configure configures and initializes the provider.
@@ -262,6 +270,24 @@ func (p *Provider) CallFunction(req providers.CallFunctionRequest) providers.Cal
 	return providers.CallFunctionResponse{
 		Result: result,
 	}
+}
+
+func (p *Provider) ListResource(req providers.ListResourceRequest) providers.ListResourceResponse {
+	var resp providers.ListResourceResponse
+	resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("unsupported list resource type %q", req.TypeName))
+	return resp
+}
+
+func (p *Provider) ValidateStateStoreConfig(req providers.ValidateStateStoreConfigRequest) providers.ValidateStateStoreConfigResponse {
+	var resp providers.ValidateStateStoreConfigResponse
+	resp.Diagnostics.Append(fmt.Errorf("unsupported state store type %q", req.TypeName))
+	return resp
+}
+
+func (p *Provider) ConfigureStateStore(req providers.ConfigureStateStoreRequest) providers.ConfigureStateStoreResponse {
+	var resp providers.ConfigureStateStoreResponse
+	resp.Diagnostics.Append(fmt.Errorf("unsupported state store type %q", req.TypeName))
+	return resp
 }
 
 // Close is a noop for this provider, since it's run in-process.

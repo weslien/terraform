@@ -39,6 +39,10 @@ type Interface interface {
 	// ephemeral resource configuration values.
 	ValidateEphemeralResourceConfig(ValidateEphemeralResourceConfigRequest) ValidateEphemeralResourceConfigResponse
 
+	// ValidateListResourceConfig allows the provider to validate the list
+	// resource configuration values.
+	ValidateListResourceConfig(ValidateListResourceConfigRequest) ValidateListResourceConfigResponse
+
 	// UpgradeResourceState is called when the state loader encounters an
 	// instance state whose schema version is less than the one reported by the
 	// currently-used version of the corresponding provider, and the upgraded
@@ -100,6 +104,18 @@ type Interface interface {
 	// CallFunction calls a provider-contributed function.
 	CallFunction(CallFunctionRequest) CallFunctionResponse
 
+	// ListResource queries the remote for a specific resource type and returns an iterator of items
+	//
+	// An error indicates that there was a problem before calling the provider,
+	// like a missing schema. Problems during a list operation are reported as
+	// diagnostics on the yielded events.
+	ListResource(ListResourceRequest) ListResourceResponse
+
+	// ValidateStateStoreConfig performs configuration validation
+	ValidateStateStoreConfig(ValidateStateStoreConfigRequest) ValidateStateStoreConfigResponse
+	// ConfigureStateStore configures the state store, such as S3 connection in the context of already configured provider
+	ConfigureStateStore(ConfigureStateStoreRequest) ConfigureStateStoreResponse
+
 	// Close shuts down the plugin process if applicable.
 	Close() error
 }
@@ -126,9 +142,16 @@ type GetProviderSchemaResponse struct {
 	// to its schema.
 	EphemeralResourceTypes map[string]Schema
 
+	// ListResourceTypes maps the name of an ephemeral resource type to its
+	// schema.
+	ListResourceTypes map[string]Schema
+
 	// Functions maps from local function name (not including an namespace
 	// prefix) to the declaration of a function.
 	Functions map[string]FunctionDecl
+
+	// StateStores maps the state store type name to that type's schema.
+	StateStores map[string]Schema
 
 	// Diagnostics contains any warnings or errors from the method call.
 	Diagnostics tfdiags.Diagnostics
@@ -257,6 +280,20 @@ type ValidateEphemeralResourceConfigRequest struct {
 }
 
 type ValidateEphemeralResourceConfigResponse struct {
+	// Diagnostics contains any warnings or errors from the method call.
+	Diagnostics tfdiags.Diagnostics
+}
+
+type ValidateListResourceConfigRequest struct {
+	// TypeName is the name of the list resource type to validate.
+	TypeName string
+
+	// Config is the configuration value to validate, which may contain unknown
+	// values.
+	Config cty.Value
+}
+
+type ValidateListResourceConfigResponse struct {
 	// Diagnostics contains any warnings or errors from the method call.
 	Diagnostics tfdiags.Diagnostics
 }
@@ -686,4 +723,66 @@ type CallFunctionResponse struct {
 	// of function.ArgError from the go-cty package to specify a problem with a
 	// specific argument.
 	Err error
+}
+
+// ListResourceEvent represents a single resource from the list operation
+type ListResourceEvent struct {
+	// Identity contains the resource identity data
+	Identity cty.Value
+
+	// DisplayName is a human-readable name for the resource
+	DisplayName string
+
+	// ResourceObject contains the full resource object if requested
+	ResourceObject cty.Value
+
+	// Diagnostics contains any warnings or errors specific to this event
+	Diagnostics tfdiags.Diagnostics
+}
+
+type ListResourceResponse struct {
+	Results []ListResourceEvent
+
+	Diagnostics tfdiags.Diagnostics
+}
+
+type ListResourceRequest struct {
+	// TypeName is the name of the resource type being read.
+	TypeName string
+
+	// Config is the block body for the list resource.
+	Config cty.Value
+
+	// IncludeResourceObject can be set to true when a provider should include
+	// the full resource object for each result
+	IncludeResourceObject bool
+
+	// Limit is the maximum number of results to return
+	Limit int64
+}
+
+type ValidateStateStoreConfigRequest struct {
+	// TypeName is the name of the state store to validate.
+	TypeName string
+
+	// Config is the configuration value to validate.
+	Config cty.Value
+}
+
+type ValidateStateStoreConfigResponse struct {
+	// Diagnostics contains any warnings or errors from the method call.
+	Diagnostics tfdiags.Diagnostics
+}
+
+type ConfigureStateStoreRequest struct {
+	// TypeName is the name of the state store to configure
+	TypeName string
+
+	// Config is the configuration value to configure the store with.
+	Config cty.Value
+}
+
+type ConfigureStateStoreResponse struct {
+	// Diagnostics contains any warnings or errors from the method call.
+	Diagnostics tfdiags.Diagnostics
 }

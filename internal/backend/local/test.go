@@ -7,12 +7,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"path/filepath"
 	"slices"
-
-	"github.com/zclconf/go-cty/cty"
-
-	"maps"
 
 	"github.com/hashicorp/terraform/internal/backend/backendrun"
 	"github.com/hashicorp/terraform/internal/command/junit"
@@ -22,7 +19,6 @@ import (
 	"github.com/hashicorp/terraform/internal/logging"
 	"github.com/hashicorp/terraform/internal/moduletest"
 	"github.com/hashicorp/terraform/internal/moduletest/graph"
-	hcltest "github.com/hashicorp/terraform/internal/moduletest/hcl"
 	"github.com/hashicorp/terraform/internal/terraform"
 	"github.com/hashicorp/terraform/internal/tfdiags"
 )
@@ -106,27 +102,13 @@ func (runner *TestSuiteRunner) Test() (moduletest.Status, tfdiags.Diagnostics) {
 	// collisions, as the test directory variables should take precedence.
 	maps.Copy(testDirectoryGlobalVariables, runner.GlobalTestVariables)
 
-	suite.Status = moduletest.Pass
+	suite.Status = moduletest.Pending
 	for _, name := range slices.Sorted(maps.Keys(suite.Files)) {
 		if runner.Cancelled {
 			return suite.Status, diags
 		}
 
 		file := suite.Files[name]
-		evalCtx := graph.NewEvalContext(&graph.EvalContextOpts{
-			CancelCtx: runner.CancelledCtx,
-			StopCtx:   runner.StoppedCtx,
-			Verbose:   runner.Verbose,
-			Render:    runner.View,
-		})
-
-		for _, run := range file.Runs {
-			// Pre-initialise the prior outputs, so we can easily tell between
-			// a run block that doesn't exist and a run block that hasn't been
-			// executed yet.
-			// (moduletest.EvalContext treats cty.NilVal as "not visited yet")
-			evalCtx.SetOutput(run, cty.NilVal)
-		}
 
 		currentGlobalVariables := runner.GlobalVariables
 		if filepath.Dir(file.Name) == runner.TestingDirectory {
@@ -135,10 +117,15 @@ func (runner *TestSuiteRunner) Test() (moduletest.Status, tfdiags.Diagnostics) {
 			currentGlobalVariables = testDirectoryGlobalVariables
 		}
 
-		evalCtx.VariableCaches = hcltest.NewVariableCaches(func(vc *hcltest.VariableCaches) {
-			maps.Copy(vc.GlobalVariables, currentGlobalVariables)
-			vc.FileVariables = file.Config.Variables
+		evalCtx := graph.NewEvalContext(graph.EvalContextOpts{
+			Config:            runner.Config,
+			CancelCtx:         runner.CancelledCtx,
+			StopCtx:           runner.StoppedCtx,
+			Verbose:           runner.Verbose,
+			Render:            runner.View,
+			UnparsedVariables: currentGlobalVariables,
 		})
+
 		fileRunner := &TestFileRunner{
 			Suite:       runner,
 			EvalContext: evalCtx,
@@ -256,8 +243,8 @@ func (runner *TestFileRunner) Test(file *moduletest.File) {
 
 	// Build the graph for the file.
 	b := graph.TestGraphBuilder{
+		Config:      runner.Suite.Config,
 		File:        file,
-		GlobalVars:  runner.EvalContext.VariableCaches.GlobalVariables,
 		ContextOpts: runner.Suite.Opts,
 	}
 	g, diags := b.Build()
@@ -267,7 +254,7 @@ func (runner *TestFileRunner) Test(file *moduletest.File) {
 	}
 
 	// walk and execute the graph
-	diags = runner.walkGraph(g)
+	diags = diags.Append(runner.walkGraph(g))
 
 	// If the graph walk was terminated, we don't want to add the diagnostics.
 	// The error the user receives will just be:
@@ -287,7 +274,7 @@ func (runner *TestFileRunner) walkGraph(g *terraform.Graph) tfdiags.Diagnostics 
 	sem := runner.Suite.semaphore
 
 	// Walk the graph.
-	walkFn := func(v dag.Vertex) (diags tfdiags.Diagnostics) {
+	walkFn := func(v dag.Vertex) tfdiags.Diagnostics {
 		if runner.EvalContext.Cancelled() {
 			// If the graph walk has been cancelled, the node should just return immediately.
 			// For now, this means a hard stop has been requested, in this case we don't
@@ -295,7 +282,7 @@ func (runner *TestFileRunner) walkGraph(g *terraform.Graph) tfdiags.Diagnostics 
 			// just show up as pending in the printed summary. We will quickly
 			// just mark the overall file status has having errored to indicate
 			// it was interrupted.
-			return
+			return nil
 		}
 
 		// the walkFn is called asynchronously, and needs to be recovered
@@ -312,18 +299,7 @@ func (runner *TestFileRunner) walkGraph(g *terraform.Graph) tfdiags.Diagnostics 
 				log.Printf("[ERROR] vertex %q panicked", dag.VertexName(v))
 				panic(r) // re-panic
 			}
-
-			if diags.HasErrors() {
-				for _, diag := range diags {
-					if diag.Severity() == tfdiags.Error {
-						desc := diag.Description()
-						log.Printf("[ERROR] vertex %q error: %s", dag.VertexName(v), desc.Summary)
-					}
-				}
-				log.Printf("[TRACE] vertex %q: visit complete, with errors", dag.VertexName(v))
-			} else {
-				log.Printf("[TRACE] vertex %q: visit complete", dag.VertexName(v))
-			}
+			log.Printf("[TRACE] vertex %q: visit complete", dag.VertexName(v))
 		}()
 
 		// Acquire a lock on the semaphore
@@ -331,9 +307,9 @@ func (runner *TestFileRunner) walkGraph(g *terraform.Graph) tfdiags.Diagnostics 
 		defer sem.Release()
 
 		if executable, ok := v.(graph.GraphNodeExecutable); ok {
-			diags = executable.Execute(runner.EvalContext)
+			executable.Execute(runner.EvalContext)
 		}
-		return
+		return nil
 	}
 
 	return g.AcyclicGraph.Walk(walkFn)

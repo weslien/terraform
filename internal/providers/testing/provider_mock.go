@@ -50,6 +50,11 @@ type MockProvider struct {
 	ValidateDataResourceConfigRequest  providers.ValidateDataResourceConfigRequest
 	ValidateDataResourceConfigFn       func(providers.ValidateDataResourceConfigRequest) providers.ValidateDataResourceConfigResponse
 
+	ValidateListResourceConfigCalled   bool
+	ValidateListResourceConfigResponse *providers.ValidateListResourceConfigResponse
+	ValidateListResourceConfigRequest  providers.ValidateListResourceConfigRequest
+	ValidateListResourceConfigFn       func(providers.ValidateListResourceConfigRequest) providers.ValidateListResourceConfigResponse
+
 	UpgradeResourceStateCalled   bool
 	UpgradeResourceStateResponse *providers.UpgradeResourceStateResponse
 	UpgradeResourceStateRequest  providers.UpgradeResourceStateRequest
@@ -121,6 +126,21 @@ type MockProvider struct {
 	CallFunctionRequest  providers.CallFunctionRequest
 	CallFunctionFn       func(providers.CallFunctionRequest) providers.CallFunctionResponse
 
+	ListResourceCalled   bool
+	ListResourceResponse providers.ListResourceResponse
+	ListResourceRequest  providers.ListResourceRequest
+	ListResourceFn       func(providers.ListResourceRequest) providers.ListResourceResponse
+
+	ValidateStateStoreConfigCalled   bool
+	ValidateStateStoreConfigResponse *providers.ValidateStateStoreConfigResponse
+	ValidateStateStoreConfigRequest  providers.ValidateStateStoreConfigRequest
+	ValidateStateStoreConfigFn       func(providers.ValidateStateStoreConfigRequest) providers.ValidateStateStoreConfigResponse
+
+	ConfigureStateStoreCalled   bool
+	ConfigureStateStoreResponse *providers.ConfigureStateStoreResponse
+	ConfigureStateStoreRequest  providers.ConfigureStateStoreRequest
+	ConfigureStateStoreFn       func(providers.ConfigureStateStoreRequest) providers.ConfigureStateStoreResponse
+
 	CloseCalled bool
 	CloseError  error
 }
@@ -144,6 +164,7 @@ func (p *MockProvider) getProviderSchema() providers.GetProviderSchemaResponse {
 		Provider:      providers.Schema{},
 		DataSources:   map[string]providers.Schema{},
 		ResourceTypes: map[string]providers.Schema{},
+		StateStores:   map[string]providers.Schema{},
 	}
 }
 
@@ -253,23 +274,53 @@ func (p *MockProvider) ValidateEphemeralResourceConfig(r providers.ValidateEphem
 	p.ValidateEphemeralResourceConfigRequest = r
 
 	// Marshall the value to replicate behavior by the GRPC protocol
-	dataSchema, ok := p.getProviderSchema().EphemeralResourceTypes[r.TypeName]
+	ephemeralSchema, ok := p.getProviderSchema().EphemeralResourceTypes[r.TypeName]
 	if !ok {
 		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("no schema found for %q", r.TypeName))
 		return resp
 	}
-	_, err := msgpack.Marshal(r.Config, dataSchema.Body.ImpliedType())
+	_, err := msgpack.Marshal(r.Config, ephemeralSchema.Body.ImpliedType())
 	if err != nil {
 		resp.Diagnostics = resp.Diagnostics.Append(err)
 		return resp
 	}
 
-	if p.ValidateDataResourceConfigFn != nil {
+	if p.ValidateEphemeralResourceConfigFn != nil {
 		return p.ValidateEphemeralResourceConfigFn(r)
 	}
 
-	if p.ValidateDataResourceConfigResponse != nil {
+	if p.ValidateEphemeralResourceConfigResponse != nil {
 		return *p.ValidateEphemeralResourceConfigResponse
+	}
+
+	return resp
+}
+
+func (p *MockProvider) ValidateListResourceConfig(r providers.ValidateListResourceConfigRequest) (resp providers.ValidateListResourceConfigResponse) {
+	p.Lock()
+	defer p.Unlock()
+
+	p.ValidateListResourceConfigCalled = true
+	p.ValidateListResourceConfigRequest = r
+
+	// Marshall the value to replicate behavior by the GRPC protocol
+	listSchema, ok := p.getProviderSchema().ListResourceTypes[r.TypeName]
+	if !ok {
+		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("no schema found for %q", r.TypeName))
+		return resp
+	}
+	_, err := msgpack.Marshal(r.Config, listSchema.Body.ImpliedType())
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(err)
+		return resp
+	}
+
+	if p.ValidateListResourceConfigFn != nil {
+		return p.ValidateListResourceConfigFn(r)
+	}
+
+	if p.ValidateListResourceConfigResponse != nil {
+		return *p.ValidateListResourceConfigResponse
 	}
 
 	return resp
@@ -790,6 +841,93 @@ func (p *MockProvider) CallFunction(r providers.CallFunctionRequest) providers.C
 	}
 
 	return p.CallFunctionResponse
+}
+
+func (p *MockProvider) ListResource(r providers.ListResourceRequest) providers.ListResourceResponse {
+	p.Lock()
+	defer p.Unlock()
+	p.ListResourceCalled = true
+	p.ListResourceRequest = r
+
+	if p.ListResourceFn != nil {
+		return p.ListResourceFn(r)
+	}
+
+	return p.ListResourceResponse
+}
+
+func (p *MockProvider) ValidateStateStoreConfig(r providers.ValidateStateStoreConfigRequest) (resp providers.ValidateStateStoreConfigResponse) {
+	p.Lock()
+	defer p.Unlock()
+
+	p.ValidateStateStoreConfigCalled = true
+	p.ValidateStateStoreConfigRequest = r
+
+	if !p.ConfigureProviderCalled {
+		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("Configure not called before ValidateStateStoreConfig %q", r.TypeName))
+		return resp
+	}
+
+	// Marshall the value to replicate behavior by the GRPC protocol,
+	// and return any relevant errors
+	storeSchema, ok := p.getProviderSchema().StateStores[r.TypeName]
+	if !ok {
+		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("no schema found for state store %q", r.TypeName))
+		return resp
+	}
+
+	if p.ValidateStateStoreConfigResponse != nil {
+		return *p.ValidateStateStoreConfigResponse
+	}
+
+	_, err := msgpack.Marshal(r.Config, storeSchema.Body.ImpliedType())
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(err)
+		return resp
+	}
+
+	if p.ValidateStateStoreConfigFn != nil {
+		return p.ValidateStateStoreConfigFn(r)
+	}
+
+	return resp
+}
+
+func (p *MockProvider) ConfigureStateStore(r providers.ConfigureStateStoreRequest) (resp providers.ConfigureStateStoreResponse) {
+	p.Lock()
+	defer p.Unlock()
+
+	p.ConfigureStateStoreCalled = true
+	p.ConfigureStateStoreRequest = r
+
+	if !p.ConfigureProviderCalled {
+		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("Configure not called before ConfigureStateStore %q", r.TypeName))
+		return resp
+	}
+
+	// Marshall the value to replicate behavior by the GRPC protocol,
+	// and return any relevant errors
+	storeSchema, ok := p.getProviderSchema().StateStores[r.TypeName]
+	if !ok {
+		resp.Diagnostics = resp.Diagnostics.Append(fmt.Errorf("no schema found for state store %q", r.TypeName))
+		return resp
+	}
+
+	if p.ConfigureStateStoreResponse != nil {
+		return *p.ConfigureStateStoreResponse
+	}
+
+	_, err := msgpack.Marshal(r.Config, storeSchema.Body.ImpliedType())
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(err)
+		return resp
+	}
+
+	if p.ConfigureStateStoreFn != nil {
+		return p.ConfigureStateStoreFn(r)
+	}
+
+	return resp
 }
 
 func (p *MockProvider) Close() error {
