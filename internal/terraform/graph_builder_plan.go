@@ -110,6 +110,11 @@ type PlanGraphBuilder struct {
 	// SkipGraphValidation indicates whether the graph builder should skip
 	// validation of the graph.
 	SkipGraphValidation bool
+
+	// targetResourceMode is the resource mode to select for the graph.
+	// If set, this is used to filter out resources that are not of the given mode.
+	// Otherwise, all resources are included.
+	targetResourceMode addrs.ResourceMode
 }
 
 // See GraphBuilder
@@ -145,8 +150,9 @@ func (b *PlanGraphBuilder) Steps() []GraphTransformer {
 			destroy:  b.Operation == walkDestroy || b.Operation == walkPlanDestroy,
 
 			importTargets: b.ImportTargets,
+			ModeFilter:    b.Operation == walkPlan && b.targetResourceMode != addrs.InvalidResourceMode,
+			Mode:          b.targetResourceMode,
 
-			// We only want to generate config during a plan operation.
 			generateConfigPathForImportTargets: b.GenerateConfigPath,
 		},
 
